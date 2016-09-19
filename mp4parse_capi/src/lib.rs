@@ -52,6 +52,7 @@ use mp4parse::MediaScaledTime;
 use mp4parse::TrackTimeScale;
 use mp4parse::TrackScaledTime;
 use mp4parse::serialize_opus_header;
+use mp4parse::Track;
 
 // rusty-cheddar's C enum generation doesn't namespace enum members by
 // prefixing them, so we're forced to do it in our member names until
@@ -135,6 +136,13 @@ pub struct mp4parse_track_video_info {
     // TODO(kinetik):
     // extra_data
     // codec_specific_config
+}
+
+#[repr(C)]
+pub struct mp4parse_fragment_info {
+    pub fragment_duration: u64,
+    // TODO:
+    // info in trex box.
 }
 
 // Even though mp4parse_parser is opaque to C, rusty-cheddar won't let us
@@ -492,6 +500,32 @@ pub unsafe extern fn mp4parse_get_track_video_info(parser: *mut mp4parse_parser,
     MP4PARSE_OK
 }
 
+#[no_mangle]
+pub unsafe extern fn mp4parse_get_fragment_info(parser: *mut mp4parse_parser, info: *mut mp4parse_fragment_info) -> mp4parse_error {
+    if parser.is_null() || info.is_null() || (*parser).poisoned() {
+        return MP4PARSE_ERROR_BADARG;
+    }
+
+    let context = (*parser).context();
+    let info: &mut mp4parse_fragment_info = &mut *info;
+
+    info.fragment_duration = 0;
+
+    let duration = match context.mvex {
+        Some(ref mvex) => mvex.fragment_duration,
+        None => return MP4PARSE_ERROR_INVALID,
+    };
+
+    if let (Some(time), Some(scale)) = (duration, context.timescale) {
+        info.fragment_duration = match media_time_to_us(time, scale) {
+            Some(time_us) => time_us as u64,
+            None => return MP4PARSE_ERROR_INVALID,
+        }
+    }
+
+    MP4PARSE_OK
+}
+
 // A fragmented file needs mvex table and contains no data in stts, stsc, and stco boxes.
 #[no_mangle]
 pub unsafe extern fn mp4parse_is_fragmented(parser: *mut mp4parse_parser, track_id: u32, fragmented: *mut u8) -> mp4parse_error {
@@ -503,8 +537,9 @@ pub unsafe extern fn mp4parse_is_fragmented(parser: *mut mp4parse_parser, track_
     let tracks = &context.tracks;
     (*fragmented) = false as u8;
 
-    if !context.has_mvex {
-        return MP4PARSE_OK;
+    match context.mvex {
+        Some(_) => {},
+        None => return MP4PARSE_OK,
     }
 
     // check sample tables.
