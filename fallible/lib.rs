@@ -4,6 +4,7 @@
 
 use std::mem;
 use std::vec::Vec;
+use std::ptr;
 
 extern "C" {
     fn realloc(ptr: *mut u8, bytes: usize) -> *mut u8;
@@ -17,7 +18,7 @@ pub trait FallibleVec<T> {
 
     /// Expand the vector size. Return Ok(()) on success, Err(()) if it
     /// fails.
-    fn try_reserve(&mut self, new_cap: usize) -> Result<(), ()>;
+    fn try_reserve(&mut self, new_cap: usize, zeroed: bool) -> Result<(), ()>;
 }
 
 /////////////////////////////////////////////////////////////////
@@ -31,7 +32,7 @@ impl<T> FallibleVec<T> for Vec<T> {
             let new_cap: usize
                 = if old_cap == 0 { 4 } else { old_cap.checked_mul(2).ok_or(()) ? };
 
-            try_extend_vec(self, new_cap)?;
+            try_extend_vec(self, new_cap, false)?;
             debug_assert!(self.capacity() > self.len());
         }
         self.push(val);
@@ -39,9 +40,9 @@ impl<T> FallibleVec<T> for Vec<T> {
     }
 
     #[inline]
-    fn try_reserve(&mut self, cap: usize) -> Result<(), ()> {
+    fn try_reserve(&mut self, cap: usize, zeroed: bool) -> Result<(), ()> {
         let new_cap = cap + self.capacity();
-        try_extend_vec(self, new_cap)?;
+        try_extend_vec(self, new_cap, zeroed)?;
         debug_assert!(self.capacity() == new_cap);
         Ok(())
     }
@@ -49,7 +50,7 @@ impl<T> FallibleVec<T> for Vec<T> {
 
 #[inline(never)]
 #[cold]
-fn try_extend_vec<T>(vec: &mut Vec<T>, new_cap: usize) -> Result<(), ()> {
+fn try_extend_vec<T>(vec: &mut Vec<T>, new_cap: usize, zeroed: bool) -> Result<(), ()> {
     let old_ptr = vec.as_mut_ptr();
     let old_len = vec.len();
 
@@ -75,6 +76,9 @@ fn try_extend_vec<T>(vec: &mut Vec<T>, new_cap: usize) -> Result<(), ()> {
     }
 
     let new_vec = unsafe {
+        if zeroed {
+            ptr::write_bytes(new_ptr, 0, new_size_bytes);
+        }
         Vec::from_raw_parts(new_ptr as *mut T, old_len, new_cap)
     };
 
@@ -85,7 +89,7 @@ fn try_extend_vec<T>(vec: &mut Vec<T>, new_cap: usize) -> Result<(), ()> {
 #[test]
 fn oom_test() {
     let mut vec: Vec<char> = Vec::new();
-    match vec.try_reserve(std::usize::MAX) {
+    match vec.try_reserve(std::usize::MAX, false) {
         Ok(_) => panic!("it should be OOM"),
         _ => (),
     }

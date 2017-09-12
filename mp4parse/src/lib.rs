@@ -76,7 +76,7 @@ pub fn vec_push<T>(vec: &mut Vec<T>, val: T) -> std::result::Result<(), ()> {
 
 pub fn vec_reserve<T>(vec: &mut Vec<T>, size: usize) -> std::result::Result<(), ()> {
     if get_fallible_allocation_mode() {
-        return vec.try_reserve(size);
+        return vec.try_reserve(size, false);
     }
 
     vec.reserve(size);
@@ -86,7 +86,7 @@ pub fn vec_reserve<T>(vec: &mut Vec<T>, size: usize) -> std::result::Result<(), 
 fn allocate_read_buf(size: usize) -> std::result::Result<Vec<u8>, ()> {
     if get_fallible_allocation_mode() {
         let mut buf: Vec<u8> = Vec::new();
-        buf.try_reserve(size)?;
+        buf.try_reserve(size, true)?;
         return Ok(buf);
     }
 
